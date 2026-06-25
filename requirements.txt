@@ -1,0 +1,8 @@
+requests>=2.31
+python-dateutil>=2.9
+python-dotenv>=1.0
+garminconnect>=0.2.20
+# FIT read+write library (fallback FIT-merge path only). Decode + encode.
+fit-tool>=0.9
+# Matcher TUI
+textual>=1.0

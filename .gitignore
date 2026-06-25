@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+state.json
+.strong_tokens.json
+backups/
+*.fit
+*.zip
+flows
+*.mitm
+.DS_Store
