@@ -1,13 +1,15 @@
 """Build a Garmin `exerciseSets` PUT payload from a Strong workout, enriching a watch
 activity's sets (HR/time-series untouched).
 
-Two modes, chosen automatically:
-  * FILL    — the watch detected real per-set ACTIVE slots: fill them positionally with
-              Strong's exercise/reps/weight, leave REST slots alone, append any overflow
-              spread toward the session end.
-  * REPLACE — the watch logged no usable per-set structure (e.g. one long ACTIVE block):
-              drop it and synthesise one ACTIVE set per Strong set, spread across the
-              session span.
+Two modes, chosen by how the watch's ACTIVE slots line up with Strong's sets:
+  * FILL    — at least one usable ACTIVE slot per Strong set: drop each Strong set into
+              its own slot in chronological order (1:1), preserving the watch's real
+              per-set timing. Any extra trailing ACTIVE slots and all REST slots are
+              left untouched.
+  * REPLACE — fewer usable ACTIVE slots than Strong sets (the watch grouped several sets
+              into one block, or logged one long block): positional filling would mislabel
+              sets, so drop the watch's structure and synthesise one ACTIVE set per Strong
+              set, in order, spread across the session span.
 """
 from __future__ import annotations
 
@@ -88,46 +90,38 @@ def build_payload(existing: dict, workout: StrongWorkout, weight_unit: str,
                   if s.get("setType") == "ACTIVE" and (s.get("duration") or 0) <= max_set_duration]
     span_start, span_end = _session_span(sets)
 
-    if active_idx:
-        # FILL: fill the watch's real per-set slots positionally
-        si = 0
-        for i in active_idx:
-            if si >= len(flat):
-                break
+    if not flat:
+        # empty workout -> nothing to write; leave the activity's sets untouched
+        es["exerciseSets"] = sets
+        return es, {"mode": "noop", "active_slots": len(active_idx),
+                    "strong_sets": 0, "appended": 0}
+
+    if len(active_idx) >= len(flat):
+        # FILL: one watch slot per Strong set, in chronological order. With at least as
+        # many usable slots as sets, every set lands in its own slot, so there is no
+        # overflow and no mislabelling. Extra trailing slots keep their original content.
+        for si, i in enumerate(active_idx[:len(flat)]):
             _, cat, name, sset = flat[si]
-            si += 1
             sets[i]["exercises"] = [{"category": cat, "name": name if use_names else None}]
             sets[i]["repetitionCount"] = int(sset.reps) if sset.reps else None
             sets[i]["weight"] = None if sset.assisted else to_grams(sset.weight, weight_unit)
-        appended = 0
-        if si < len(flat):
-            last_t = _parse_t(sets[active_idx[-1]]["startTime"]) or span_start
-            rem = flat[si:]
-            gap = ((span_end - last_t).total_seconds() / (len(rem) + 1)
-                   if (span_end and last_t and span_end > last_t) else 30.0)
-            nidx = max((s.get("messageIndex") or 0) for s in sets) + 1
-            for k, (_, cat, name, sset) in enumerate(rem, 1):
-                st = last_t + timedelta(seconds=gap * k) if last_t else None
-                sets.append(_make_set(cat, name, sset, weight_unit, use_names,
-                                      st, sset.duration or 30.0, nidx))
-                nidx += 1
-                appended += 1
-        mode = "fill"
+        mode, appended = "fill", 0
     else:
-        # REPLACE: no usable per-set structure -> synthesise one ACTIVE set per Strong set
+        # REPLACE: fewer usable slots than sets (the watch grouped sets into blocks).
+        # Positional filling would scramble exercise order, so synthesise one ACTIVE set
+        # per Strong set, in order, spread across the session span.
         if not span_start:
             span_start = workout.start
             span_end = workout.end or (workout.start + timedelta(minutes=max(1, len(flat))))
         total = max(1.0, (span_end - span_start).total_seconds())
-        gap = total / len(flat) if flat else 0
+        gap = total / len(flat)
         new = []
         for k, (_, cat, name, sset) in enumerate(flat):
             st = span_start + timedelta(seconds=gap * k)
             dur = float(sset.duration) if sset.duration else max(5.0, min(gap * 0.8, 120.0))
             new.append(_make_set(cat, name, sset, weight_unit, use_names, st, dur, k))
         sets = new
-        appended = len(new)
-        mode = "replace"
+        mode, appended = "replace", len(new)
 
     es["exerciseSets"] = sets
     summary = {"mode": mode, "active_slots": len(active_idx),
