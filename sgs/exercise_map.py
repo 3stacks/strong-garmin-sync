@@ -88,6 +88,11 @@ STRONG_TO_FIT: dict[str, tuple[str, str | None]] = {
     "Banded Leg Curl": ("LEG_CURL", "LEG_CURL"),
     "Hanging Leg Raise": ("LEG_RAISE", None),
     "Pullover (Dumbbell)": ("UNKNOWN", None),   # no suitable FIT category
+    # --- Upper B gaps (added 2026-06-26, sub-names validated against the live API) ---
+    "Swiss Bar OHP": ("SHOULDER_PRESS", "OVERHEAD_BARBELL_PRESS"),   # swiss/football bar = neutral-grip barbell OHP
+    "Reverse Fly (Dumbbell)": ("LATERAL_RAISE", "BENT_OVER_LATERAL_RAISE"),  # rear-delt fly = bent-over lateral raise
+    "Chest Dip": ("TRICEPS_EXTENSION", "BODY_WEIGHT_DIP"),   # FIT files all dips under TRICEPS_EXTENSION
+    "Incline Row (Dumbbell)": ("ROW", "DUMBBELL_ROW"),
 }
 
 _LOWER = {k.lower(): v for k, v in STRONG_TO_FIT.items()}
