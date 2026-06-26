@@ -25,8 +25,9 @@ from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.messages.session_message import SessionMessage
 from fit_tool.profile.messages.set_message import SetMessage
+from fit_tool.profile import profile_type as _profile_type
 from fit_tool.profile.profile_type import (
-    FileType, Manufacturer, SetType, Sport, SubSport,
+    ExerciseCategory, FileType, Manufacturer, SetType, Sport, SubSport,
 )
 
 from . import exercise_map
@@ -86,6 +87,40 @@ def _from_ms(ms) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
 
+# ---- exercise enum translation --------------------------------------------
+_UNKNOWN_CATEGORY = ExerciseCategory.UNKNOWN.value
+
+
+def _name_enum_for(category: str):
+    """The per-category exercise-name enum class for a FIT category string, by the FIT
+    profile's naming convention (e.g. 'BENCH_PRESS' -> BenchPressExerciseName). None if the
+    category has no sub-name enum."""
+    cls = "".join(p.capitalize() for p in category.split("_")) + "ExerciseName"
+    return getattr(_profile_type, cls, None)
+
+
+def _fit_enums(strong_name: str) -> tuple[int, int | None]:
+    """Resolve a Strong exercise name to FIT integer (category, category_subtype) enums.
+
+    exercise_map yields the FIT *string* enum names (what the exerciseSets JSON API wants);
+    the binary FIT format needs their integer values, so translate here. An unknown category
+    or sub-name degrades to UNKNOWN / category-only rather than raising."""
+    cat_s, name_s = exercise_map.lookup(strong_name)
+    try:
+        cat = ExerciseCategory[cat_s].value
+    except KeyError:
+        log.warning("no FIT category %r for %r -> UNKNOWN", cat_s, strong_name)
+        return _UNKNOWN_CATEGORY, None
+    if not name_s:
+        return cat, None
+    enum_cls = _name_enum_for(cat_s)
+    if enum_cls is not None and name_s in enum_cls.__members__:
+        return cat, enum_cls[name_s].value
+    log.warning("no FIT sub-name %r under %s for %r -> category only",
+                name_s, cat_s, strong_name)
+    return cat, None
+
+
 # ---- pure planning --------------------------------------------------------
 def plan_sets(workout: StrongWorkout, watch: WatchFit | None, cfg: Config) -> list[OutSet]:
     flat = [(ex, s) for ex in workout.exercises for s in ex.sets]
@@ -100,7 +135,7 @@ def plan_sets(workout: StrongWorkout, watch: WatchFit | None, cfg: Config) -> li
     out: list[OutSet] = []
     oi = 0
     for i, (ex, s) in enumerate(flat):
-        cat, sub = exercise_map.lookup(ex.name)
+        cat, sub = _fit_enums(ex.name)
         weight_kg = None if s.assisted else to_kg(s.weight, cfg.strong_weight_unit)
         if i < len(slots):
             st, slot_dur = slots[i].start_time, slots[i].duration_s
